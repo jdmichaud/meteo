@@ -34,7 +34,12 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
         if idx > 0 {
             println!();
         }
-        for (entry_idx, entry) in day.entries.iter().enumerate() {
+        let entries: Vec<_> = if config.reverse_order {
+            day.entries.iter().rev().collect()
+        } else {
+            day.entries.iter().collect()
+        };
+        for (entry_idx, entry) in entries.iter().enumerate() {
             let is_current = current == Some((day.date, entry.hour));
             println!("{}", format_row(entry, day, entry_idx == 0, config, is_current));
         }
