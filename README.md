@@ -2,6 +2,8 @@
 
 Terminal weather forecast for France, powered by Météo-France (AROME, ARPEGE) and Open-Meteo.
 
+![screenshot](screenshot.png)
+
 ## Installation
 
 ```sh
