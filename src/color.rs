@@ -57,6 +57,15 @@ fn gradient_index(t: f32) -> u8 {
     16 + 36 * r + 6 * g + b
 }
 
+/// 256-colour gradient index for `value` on the [`min`, `max`] scale.
+/// Used by the temperature side-graph so its line hue matches the temp column.
+pub fn gradient_index_for(value: f32, min: f32, max: f32) -> u8 {
+    if max <= min {
+        return gradient_index(0.5);
+    }
+    gradient_index((value - min) / (max - min))
+}
+
 /// Wraps `text` in 256-colour background escape sequences.
 ///
 /// `zero_no_color`: when true, a value of exactly 0.0 is rendered without colour.

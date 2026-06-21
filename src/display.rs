@@ -2,13 +2,10 @@ use chrono::{Datelike, Local, Timelike};
 
 use crate::color::colored_field;
 use crate::config::Config;
+use crate::graph::{self, OutLine, Role};
 use crate::weather::{WeatherDay, WeatherEntry};
 
 pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
-    if let Some(name) = location {
-        println!("{}", name);
-    }
-
     // Find the most recent displayed hour slot that has already passed today.
     let now       = Local::now();
     let today     = now.date_naive();
@@ -24,7 +21,18 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
                 .map(|h| (today, h))
         });
 
-    print_wind_header(&config.language);
+    // Build every output line first so the temperature graph can be laid out
+    // in the right margin and aligned with the forecast rows.
+    let mut out: Vec<OutLine> = Vec::new();
+
+    if let Some(name) = location {
+        out.push(OutLine { text: name.to_string(), temp: None, role: Role::Plain });
+    }
+
+    let (h1, h2) = wind_header_lines(&config.language);
+    out.push(OutLine { text: h1, temp: None, role: Role::GraphTitle });
+    out.push(OutLine { text: h2, temp: None, role: Role::GraphAxis });
+
     let ordered: Vec<_> = if config.reverse_order {
         days.iter().rev().collect()
     } else {
@@ -32,7 +40,7 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
     };
     for (idx, day) in ordered.iter().enumerate() {
         if idx > 0 {
-            println!();
+            out.push(OutLine { text: String::new(), temp: None, role: Role::Body });
         }
         let entries: Vec<_> = if config.reverse_order {
             day.entries.iter().rev().collect()
@@ -41,12 +49,22 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
         };
         for (entry_idx, entry) in entries.iter().enumerate() {
             let is_current = current == Some((day.date, entry.hour));
-            println!("{}", format_row(entry, day, entry_idx == 0, config, is_current));
+            out.push(OutLine {
+                text: format_row(entry, day, entry_idx == 0, config, is_current),
+                temp: Some(entry.temp_c),
+                role: Role::Body,
+            });
         }
+    }
+
+    graph::decorate(&mut out, config);
+
+    for line in &out {
+        println!("{}", line.text);
     }
 }
 
-fn print_wind_header(lang: &str) {
+fn wind_header_lines(lang: &str) -> (String, String) {
     // Offset to the wind columns:
     // gutter(2) + day(8) + hour(4) + temp(8) + wdir(5) = 27
     let pad = "                           "; // 27 spaces
@@ -57,8 +75,7 @@ fn print_wind_header(lang: &str) {
         (" Wind speed ", " Avg. ", " Burst")
     };
 
-    println!("{}{}", pad, top);
-    println!("{}{}{}", pad, avg_lbl, burst_lbl);
+    (format!("{}{}", pad, top), format!("{}{}{}", pad, avg_lbl, burst_lbl))
 }
 
 // Column widths (display chars):

@@ -4,6 +4,7 @@ mod config;
 mod display;
 mod fake_data;
 mod geocode;
+mod graph;
 mod weather;
 
 fn main() {

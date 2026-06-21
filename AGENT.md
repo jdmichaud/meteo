@@ -53,6 +53,7 @@ cargo build --release --target x86_64-pc-windows-gnu
 | `src/weather.rs` | Core types: `WeatherEntry`, `WeatherDay`, `WindDir`, `Condition` |
 | `src/fake_data.rs` | Deterministic fake 5-day forecast (`--fake` flag, no network) |
 | `src/display.rs` | Fixed-width column layout, row formatting, ANSI colour integration |
+| `src/graph.rs` | Optional braille temperature side-graph in the right margin |
 | `src/color.rs` | 256-colour gradient, terminal capability check, Windows ANSI init |
 
 ## Colour system
@@ -76,6 +77,30 @@ Wind speed and precipitation at exactly 0 get no background colour.
 All widths are in terminal display columns. The arrow characters (↑ ↗ → …)
 are narrow (1 column); the emoji icons are wide (2 columns) but sit at the
 end of the line so they do not affect column alignment.
+
+## Temperature side-graph
+
+`src/display.rs` builds every output line into a `Vec<OutLine>` (each tagged with
+its `Role` and, for forecast rows, its temperature) and hands it to
+`graph::decorate`, which draws a temperature line-graph in the right margin when
+the terminal is wide enough.
+
+Because the table is tall and narrow, the graph is a **full-height side panel
+aligned row-for-row** with the forecast:
+
+- vertical axis = time — one anchor per forecast row, so each line's curve point
+  sits next to that line's temperature value (order-agnostic: works with both
+  `--forward` and `--reverse`);
+- horizontal axis = temperature — auto-scaled to the data (cold → left), with the
+  min/max printed on the second header line;
+- the curve is drawn with Unicode braille dots (8 sub-cells per glyph, as in
+  uplot) and coloured with the same gradient as the temperature column, so a
+  given temperature shares its hue in both places.
+
+Layout constants live at the top of `src/graph.rs`: `GAP` (columns between table
+and graph), `MIN_W` (skip the graph below this width) and `MAX_W` (cap on wide
+terminals). Width comes from `terminal_size`; piped output gets no graph. Set
+`METEO_COLS=<n>` to force a width (useful for screenshots and tests).
 
 ## Weather API — model cascade
 
