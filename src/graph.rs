@@ -1,52 +1,42 @@
-//! Optional side-graphs rendered in the right margin.
+//! Optional temperature side-graph rendered in the right margin.
 //!
-//! The forecast table is tall and narrow, so each metric is drawn as a
-//! full-height panel aligned row-for-row with the table:
+//! The forecast table is tall and narrow, so the graph is laid out as a
+//! full-height side panel aligned row-for-row with the table:
 //!   • vertical axis = time   (one anchor per forecast row, matching each line)
-//!   • horizontal axis = the metric value (low → left, high → right, auto-scaled)
-//! Lines are drawn with Unicode braille dots (8 sub-cells per character, as in
-//! uplot) for a smooth curve. Temperature and rain reuse the same colour
-//! gradient as their table columns; pressure has no gradient so it uses a
-//! single neutral hue.
+//!   • horizontal axis = temperature (cold → left, hot → right, auto-scaled)
+//! The line is drawn with Unicode braille dots (8 sub-cells per character, as
+//! in uplot) for a smooth curve, and coloured with the same gradient as the
+//! temperature column so a given temperature shares its hue in both places.
 //!
-//! As many panels as fit are shown, side by side, in priority order
-//! (temperature, pressure, rain). They are only drawn when the terminal is
-//! wide enough; otherwise the lines are left untouched.
+//! It is only drawn when the terminal is wide enough; otherwise the lines are
+//! left untouched and the output is identical to the no-graph layout.
 
 use crate::color::gradient_index_for;
 use crate::config::Config;
 
-/// Role of an output line, deciding what (if anything) the graphs attach to it.
+/// Role of an output line, deciding what (if anything) the graph attaches to it.
 pub enum Role {
     /// Printed verbatim, never decorated (e.g. the location line).
     Plain,
-    /// First header/footer line — receives the graph titles.
+    /// First header line — receives the graph title.
     GraphTitle,
-    /// Second header/footer line — receives the axis scales.
+    /// Second header line — receives the temperature axis scale.
     GraphAxis,
     /// A data-region line (forecast row or day separator) — receives graph cells.
     Body,
 }
 
-/// The graphable values of a forecast row.
-pub struct Metrics {
-    pub temp: f32,
-    pub pressure: f32,
-    pub precip: f32,
-}
-
-/// One line of output plus the metadata the graphs need.
+/// One line of output plus the metadata the graph needs.
 pub struct OutLine {
     pub text: String,
-    /// Metric values for forecast rows; `None` for separators/headers.
-    pub metrics: Option<Metrics>,
+    /// Temperature for forecast rows; `None` for separators/headers.
+    pub temp: Option<f32>,
     pub role: Role,
 }
 
-const GAP: usize = 2; // blank columns between the table and the first graph
-const GRAPH_GAP: usize = 2; // blank columns between adjacent graphs
-const MIN_W: usize = 14; // minimum width (chars) for one graph to be worth drawing
-const MAX_W: usize = 40; // cap so a graph stays tidy on very wide terminals
+const GAP: usize = 2; // blank columns between the table and the graph
+const MIN_W: usize = 14; // minimum graph width (chars) worth drawing
+const MAX_W: usize = 40; // cap so the graph stays tidy on very wide terminals
 
 // Braille dot bit for sub-cell (cx ∈ 0..2 columns, cy ∈ 0..4 rows).
 // Unicode dot numbering and bit values:
@@ -61,42 +51,17 @@ const BRAILLE: [[u8; 2]; 4] = [
     [0x40, 0x80],
 ];
 
-/// How a series' line is coloured per row.
-enum SeriesColor {
-    /// 256-colour gradient over [`min`, `max`] (matches the table column).
-    Gradient { min: f32, max: f32 },
-    /// A single fixed 256-colour index.
-    Fixed(u8),
-}
-
-/// A metric to plot: its titles (longest-that-fits is used), values, colour
-/// scheme and axis-label unit.
-struct Series {
-    titles: Vec<&'static str>,
-    values: Vec<Option<f32>>,
-    color: SeriesColor,
-    unit: &'static str,
-}
-
-/// A rendered plot: braille cells, per-row colour and the axis extremes.
-struct Plot {
-    cells: Vec<u8>,   // n rows × w columns of braille bitmasks
-    color: Vec<u8>,   // per-row 256-colour index
-    lo: f32,          // axis minimum (data min)
-    hi: f32,          // axis maximum (data max)
-}
-
-/// Attach the side-graphs to `lines` in place, when the terminal allows.
+/// Attach the temperature graph to `lines` in place, when the terminal allows.
 pub fn decorate(lines: &mut [OutLine], config: &Config) {
     let cols = match terminal_cols() {
         Some(c) => c,
-        None => return, // not a terminal (piped) and no override → no graphs
+        None => return, // not a terminal (piped) and no override → no graph
     };
 
     // The table width is the widest forecast row (all rows share one width).
     let body_width = match lines
         .iter()
-        .filter(|l| matches!(l.role, Role::Body) && l.metrics.is_some())
+        .filter(|l| matches!(l.role, Role::Body) && l.temp.is_some())
         .map(|l| display_width(&l.text))
         .max()
     {
@@ -106,9 +71,9 @@ pub fn decorate(lines: &mut [OutLine], config: &Config) {
 
     let graph_col = body_width + GAP;
     if cols <= graph_col + MIN_W {
-        return; // terminal too narrow for even one graph
+        return; // terminal too narrow to be worth it
     }
-    let avail = cols - graph_col;
+    let graph_w = (cols - graph_col).min(MAX_W);
 
     // Body lines, in printed order (forecast rows and the day separators).
     let body_idx: Vec<usize> = lines
@@ -122,183 +87,44 @@ pub fn decorate(lines: &mut [OutLine], config: &Config) {
         return;
     }
 
-    // Per-body-line metric values (None for the day separators).
-    let values = |pick: fn(&Metrics) -> f32| -> Vec<Option<f32>> {
-        body_idx
-            .iter()
-            .map(|&i| lines[i].metrics.as_ref().map(pick))
-            .collect()
-    };
-    let fr = config.language == "fr";
-    let series = [
-        Series {
-            titles: if fr {
-                vec!["Température (°C)", "Temp. °C", "°C"]
-            } else {
-                vec!["Temperature (°C)", "Temp. °C", "°C"]
-            },
-            values: values(|m| m.temp),
-            color: SeriesColor::Gradient {
-                min: config.temperature.min,
-                max: config.temperature.max,
-            },
-            unit: "°",
-        },
-        Series {
-            titles: if fr {
-                vec!["Pression Athm.", "Pression", "hPa"]
-            } else {
-                vec!["Athm. Pressure", "Pressure", "hPa"]
-            },
-            values: values(|m| m.pressure),
-            color: SeriesColor::Fixed(250),
-            unit: "",
-        },
-        Series {
-            titles: if fr {
-                vec!["Pluie (mm)", "Pluie", "mm"]
-            } else {
-                vec!["Rain (mm)", "Rain", "mm"]
-            },
-            values: values(|m| m.precip),
-            color: SeriesColor::Gradient {
-                min: config.water.min,
-                max: config.water.max,
-            },
-            unit: "",
-        },
-    ];
-
-    // How many graphs fit side by side, and their shared width.
-    let mut count = 0;
-    for c in 1..=series.len() {
-        if c * MIN_W + (c - 1) * GRAPH_GAP <= avail {
-            count = c;
-        } else {
-            break;
-        }
-    }
-    let w = ((avail - (count - 1) * GRAPH_GAP) / count).min(MAX_W);
-
-    // Build the plots for the chosen series.
-    let plots: Vec<(Plot, &Series)> = series
+    // Anchors: (row index within the body, temperature).
+    let anchors: Vec<(usize, f32)> = body_idx
         .iter()
-        .take(count)
-        .filter_map(|s| build_plot(&s.values, n, w, &s.color).map(|p| (p, s)))
+        .enumerate()
+        .filter_map(|(k, &i)| lines[i].temp.map(|t| (k, t)))
         .collect();
-    if plots.is_empty() {
+    if anchors.len() < 2 {
         return;
     }
 
-    // Compose: append the graph strip / titles / axes to each line.
-    let mut k = 0;
-    for line in lines.iter_mut() {
-        let right = match line.role {
-            Role::Body => {
-                let s = join(&plots, GRAPH_GAP, |(plot, _), is_last| {
-                    row_string(plot, k, w, is_last)
-                });
-                k += 1;
-                s
-            }
-            Role::GraphTitle => join(&plots, GRAPH_GAP, |(_, s), _| {
-                center(pick_title(&s.titles, w), w)
-            }),
-            Role::GraphAxis => join(&plots, GRAPH_GAP, |(plot, s), _| {
-                let lo = format!("{:.0}{}", plot.lo, s.unit);
-                let hi = format!("{:.0}{}", plot.hi, s.unit);
-                axis(&lo, &hi, w)
-            }),
-            Role::Plain => continue,
-        };
-        append_right(&mut line.text, graph_col, &right);
-    }
-}
-
-/// Join each plot's segment with `gap` spaces, flagging the final one.
-fn join<F>(plots: &[(Plot, &Series)], gap: usize, mut seg: F) -> String
-where
-    F: FnMut(&(Plot, &Series), bool) -> String,
-{
-    let last = plots.len() - 1;
-    let mut s = String::new();
-    for (i, p) in plots.iter().enumerate() {
-        if i > 0 {
-            s.push_str(&" ".repeat(gap));
-        }
-        s.push_str(&seg(p, i == last));
-    }
-    s
-}
-
-/// Pad `text` to `col` then append `right`, trimming trailing blank padding.
-fn append_right(text: &mut String, col: usize, right: &str) {
-    pad_to(text, col);
-    text.push_str(right);
-    // Colour resets / braille glyphs do not end in whitespace, so this only
-    // strips the spacer/centering padding — never visible graph content.
-    let end = text.trim_end().len();
-    text.truncate(end);
-}
-
-/// Render row `k` of `plot` to a coloured braille string `w` columns wide.
-/// Blank cells are plain spaces; the final graph in a row drops its trailing
-/// blanks so lines do not carry invisible padding to the terminal edge.
-fn row_string(plot: &Plot, k: usize, w: usize, is_last: bool) -> String {
-    let row = &plot.cells[k * w..(k + 1) * w];
-    let (first, last) = match (row.iter().position(|&b| b != 0), row.iter().rposition(|&b| b != 0)) {
-        (Some(f), Some(l)) => (f, l),
-        _ => return if is_last { String::new() } else { " ".repeat(w) },
-    };
-
-    let mut s = " ".repeat(first); // leading blank cells
-    s.push_str(&format!("\x1b[38;5;{}m", plot.color[k]));
-    for &bits in &row[first..=last] {
-        s.push(char::from_u32(0x2800 + bits as u32).unwrap());
-    }
-    s.push_str("\x1b[0m");
-    if !is_last {
-        s.push_str(&" ".repeat(w - 1 - last)); // trailing blank cells
-    }
-    s
-}
-
-/// Plot a series into an `n`×`w` braille canvas, or `None` if it lacks data.
-fn build_plot(values: &[Option<f32>], n: usize, w: usize, color: &SeriesColor) -> Option<Plot> {
-    // Anchors: (row index within the body, value).
-    let anchors: Vec<(usize, f32)> = values
+    // Auto-scale the horizontal (temperature) axis to the data.
+    let tmin = anchors.iter().map(|&(_, t)| t).fold(f32::INFINITY, f32::min);
+    let tmax = anchors
         .iter()
-        .enumerate()
-        .filter_map(|(k, v)| v.map(|x| (k, x)))
-        .collect();
-    if anchors.len() < 2 {
-        return None;
-    }
-
-    let dmin = anchors.iter().map(|&(_, v)| v).fold(f32::INFINITY, f32::min);
-    let dmax = anchors.iter().map(|&(_, v)| v).fold(f32::NEG_INFINITY, f32::max);
-    // Auto-scale the horizontal axis; a near-flat series sits against a
-    // one-unit scale from its minimum (so a flat line hugs the left edge).
-    let (lo, hi) = if dmax - dmin < 0.5 {
-        (dmin, dmin + 1.0)
+        .map(|&(_, t)| t)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let (lo, hi) = if tmax - tmin < 0.5 {
+        (tmin - 0.5, tmin + 0.5)
     } else {
-        (dmin, dmax)
+        (tmin, tmax)
     };
 
-    let dots_w = (w * 2) as f32;
-    let x_of = |v: f32| -> i32 {
-        (((v - lo) / (hi - lo)) * (dots_w - 1.0))
+    let dots_w = (graph_w * 2) as f32;
+    let x_of = |t: f32| -> i32 {
+        (((t - lo) / (hi - lo)) * (dots_w - 1.0))
             .round()
             .clamp(0.0, dots_w - 1.0) as i32
     };
 
-    let mut cells = vec![0u8; n * w];
-    let mut val_at = vec![lo; n]; // per-row value for colouring, interpolated
+    // Braille cell bitmasks: n rows × graph_w columns.
+    let mut canvas = vec![0u8; n * graph_w];
+    // Per-row temperature for colouring, interpolated between anchors.
+    let mut temp_at = vec![lo; n];
 
     const C: i32 = 1; // dot-row offset of an anchor inside its 4-row cell
-    for win in anchors.windows(2) {
-        let (k0, t0) = win[0];
-        let (k1, t1) = win[1];
+    for w in anchors.windows(2) {
+        let (k0, t0) = w[0];
+        let (k1, t1) = w[1];
         let y0 = k0 as i32 * 4 + C;
         let y1 = k1 as i32 * 4 + C;
 
@@ -309,38 +135,84 @@ fn build_plot(values: &[Option<f32>], n: usize, w: usize, color: &SeriesColor) -
             // Bridge horizontally so steep slopes stay an unbroken line.
             let (a, b) = if prev_x <= x { (prev_x, x) } else { (x, prev_x) };
             for xx in a..=b {
-                set_dot(&mut cells, w, n, xx, y);
+                set_dot(&mut canvas, graph_w, n, xx, y);
             }
             prev_x = x;
         }
 
         for k in k0..=k1 {
             let f = (k - k0) as f32 / (k1 - k0) as f32;
-            val_at[k] = t0 + (t1 - t0) * f;
+            temp_at[k] = t0 + (t1 - t0) * f;
         }
     }
 
-    let color = (0..n)
-        .map(|k| match color {
-            SeriesColor::Gradient { min, max } => gradient_index_for(val_at[k], *min, *max),
-            SeriesColor::Fixed(c) => *c,
+    // Render each canvas row to a coloured braille string (trailing blanks trimmed).
+    let strip: Vec<String> = (0..n)
+        .map(|k| {
+            let row = &canvas[k * graph_w..(k + 1) * graph_w];
+            let last = row.iter().rposition(|&b| b != 0).map(|p| p + 1).unwrap_or(0);
+            if last == 0 {
+                return String::new();
+            }
+            let idx = gradient_index_for(temp_at[k], config.temperature.min, config.temperature.max);
+            let mut s = format!("\x1b[38;5;{}m", idx);
+            for &bits in &row[..last] {
+                s.push(char::from_u32(0x2800 + bits as u32).unwrap());
+            }
+            s.push_str("\x1b[0m");
+            s
         })
         .collect();
 
-    Some(Plot { cells, color, lo: dmin, hi: dmax })
+    // Header decorations: title above the graph, temperature scale below it.
+    // Pick the longest title variant that fits the graph width.
+    let titles: [&str; 3] = if config.language == "fr" {
+        ["Température (°C)", "Temp. °C", "°C"]
+    } else {
+        ["Temperature (°C)", "Temp. °C", "°C"]
+    };
+    let title = titles
+        .iter()
+        .find(|t| t.chars().count() <= graph_w)
+        .copied()
+        .unwrap_or("");
+    let lo_lbl = format!("{}°", tmin.round() as i32);
+    let hi_lbl = format!("{}°", tmax.round() as i32);
+
+    let mut k = 0;
+    for line in lines.iter_mut() {
+        match line.role {
+            Role::Body => {
+                if !strip[k].is_empty() {
+                    pad_to(&mut line.text, graph_col);
+                    line.text.push_str(&strip[k]);
+                }
+                k += 1;
+            }
+            Role::GraphTitle => {
+                pad_to(&mut line.text, graph_col);
+                line.text.push_str(&center(title, graph_w));
+            }
+            Role::GraphAxis => {
+                pad_to(&mut line.text, graph_col);
+                line.text.push_str(&axis(&lo_lbl, &hi_lbl, graph_w));
+            }
+            Role::Plain => {}
+        }
+    }
 }
 
 /// Set the braille dot at absolute dot-coordinates (`dx`, `dy`).
-fn set_dot(cells: &mut [u8], w: usize, n: usize, dx: i32, dy: i32) {
+fn set_dot(canvas: &mut [u8], graph_w: usize, n: usize, dx: i32, dy: i32) {
     if dx < 0 || dy < 0 {
         return;
     }
     let (dx, dy) = (dx as usize, dy as usize);
     let (cell_row, cell_col) = (dy / 4, dx / 2);
-    if cell_row >= n || cell_col >= w {
+    if cell_row >= n || cell_col >= graph_w {
         return;
     }
-    cells[cell_row * w + cell_col] |= BRAILLE[dy % 4][dx % 2];
+    canvas[cell_row * graph_w + cell_col] |= BRAILLE[dy % 4][dx % 2];
 }
 
 /// Terminal width: `METEO_COLS` override first (handy for tests/screenshots),
@@ -352,15 +224,6 @@ fn terminal_cols() -> Option<usize> {
         }
     }
     terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
-}
-
-/// Longest title variant that fits within `width` columns (else empty).
-fn pick_title(titles: &[&'static str], width: usize) -> &'static str {
-    titles
-        .iter()
-        .copied()
-        .find(|t| t.chars().count() <= width)
-        .unwrap_or("")
 }
 
 /// Display width of `s`, skipping ANSI SGR escapes and counting wide glyphs as 2.
