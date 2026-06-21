@@ -78,13 +78,40 @@ fn wind_header_lines(lang: &str) -> (String, String) {
     // gutter(2) + day(8) + hour(4) + temp(8) + wdir(5) = 27
     let pad = "                           "; // 27 spaces
 
-    let (top, avg_lbl, burst_lbl) = if lang == "fr" {
-        ("Vitesse vent", " Moy. ", "Rafale")
+    // (wind title, wind avg, wind burst, pressure top/bottom, rain).
+    // The pressure name is stacked across the two header lines.
+    let (top, avg_lbl, burst_lbl, pres_top, pres_bot, rain) = if lang == "fr" {
+        ("Vitesse vent", " Moy. ", "Rafale", "Pression", "Athm.", "Pluie")
     } else {
-        (" Wind speed ", " Avg. ", " Burst")
+        (" Wind speed ", " Avg. ", " Burst", "Athm.", "Pressure", "Rain")
     };
 
-    (format!("{}{}", pad, top), format!("{}{}{}", pad, avg_lbl, burst_lbl))
+    let mut line1 = format!("{}{}", pad, top);
+    let mut line2 = format!("{}{}{}", pad, avg_lbl, burst_lbl);
+
+    // Centre each label over its column's value: pressure value sits at display
+    // cols 42-45, rain value at 49-53.
+    place(&mut line1, header_col(42, 4, pres_top), pres_top);
+    place(&mut line2, header_col(42, 4, pres_bot), pres_bot);
+    place(&mut line1, header_col(49, 5, rain), rain);
+
+    (line1, line2)
+}
+
+/// Column where a `label` should start to be centred over a value region that
+/// begins at `value_start` and is `value_len` columns wide.
+fn header_col(value_start: usize, value_len: usize, label: &str) -> usize {
+    let start = value_start as i32 - (label.chars().count() as i32 - value_len as i32) / 2;
+    start.max(0) as usize
+}
+
+/// Pad `line` with spaces up to display column `col`, then append `label`.
+fn place(line: &mut String, col: usize, label: &str) {
+    let cur = line.chars().count();
+    if cur < col {
+        line.push_str(&" ".repeat(col - cur));
+    }
+    line.push_str(label);
 }
 
 // Column widths (display chars):
