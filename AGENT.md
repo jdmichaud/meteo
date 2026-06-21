@@ -53,7 +53,7 @@ cargo build --release --target x86_64-pc-windows-gnu
 | `src/weather.rs` | Core types: `WeatherEntry`, `WeatherDay`, `WindDir`, `Condition` |
 | `src/fake_data.rs` | Deterministic fake 5-day forecast (`--fake` flag, no network) |
 | `src/display.rs` | Fixed-width column layout, row formatting, ANSI colour integration |
-| `src/graph.rs` | Optional braille temperature side-graph in the right margin |
+| `src/graph.rs` | Optional braille side-graphs (temp / pressure / rain) in the right margin |
 | `src/color.rs` | 256-colour gradient, terminal capability check, Windows ANSI init |
 
 ## Colour system
@@ -78,29 +78,35 @@ All widths are in terminal display columns. The arrow characters (↑ ↗ → �
 are narrow (1 column); the emoji icons are wide (2 columns) but sit at the
 end of the line so they do not affect column alignment.
 
-## Temperature side-graph
+## Side-graphs
 
 `src/display.rs` builds every output line into a `Vec<OutLine>` (each tagged with
-its `Role` and, for forecast rows, its temperature) and hands it to
-`graph::decorate`, which draws a temperature line-graph in the right margin when
+its `Role` and, for forecast rows, its `Metrics`) and hands it to
+`graph::decorate`, which draws one or more line-graphs in the right margin when
 the terminal is wide enough.
 
-Because the table is tall and narrow, the graph is a **full-height side panel
-aligned row-for-row** with the forecast:
+Because the table is tall and narrow, each graph is a **full-height panel aligned
+row-for-row** with the forecast:
 
 - vertical axis = time — one anchor per forecast row, so each line's curve point
-  sits next to that line's temperature value (order-agnostic: works with both
-  `--forward` and `--reverse`);
-- horizontal axis = temperature — auto-scaled to the data (cold → left), with the
-  min/max printed on the second header line;
-- the curve is drawn with Unicode braille dots (8 sub-cells per glyph, as in
-  uplot) and coloured with the same gradient as the temperature column, so a
-  given temperature shares its hue in both places.
+  sits next to that row's value (order-agnostic: works with both `--forward` and
+  `--reverse`);
+- horizontal axis = the metric value — auto-scaled to the data (low → left), with
+  the min/max printed on the second header line;
+- curves use Unicode braille dots (8 sub-cells per glyph, as in uplot).
+  Temperature and rain reuse the same colour gradient as their table columns
+  (`temperature` / `water` ranges); pressure has no gradient so it uses one fixed
+  hue.
 
-Layout constants live at the top of `src/graph.rs`: `GAP` (columns between table
-and graph), `MIN_W` (skip the graph below this width) and `MAX_W` (cap on wide
-terminals). Width comes from `terminal_size`; piped output gets no graph. Set
-`METEO_COLS=<n>` to force a width (useful for screenshots and tests).
+Series are defined in `decorate` in priority order — **temperature, pressure,
+rain** — and as many as fit are drawn side by side, sharing one width. In reverse
+mode the header (and therefore the titles/axes) is repeated as a footer, giving
+the plots a bottom axis too.
+
+Layout constants live at the top of `src/graph.rs`: `GAP` (table → first graph),
+`GRAPH_GAP` (between graphs), `MIN_W` (skip a graph below this width) and `MAX_W`
+(per-graph cap on wide terminals). Width comes from `terminal_size`; piped output
+gets no graph. Set `METEO_COLS=<n>` to force a width (handy for screenshots/tests).
 
 ## Weather API — model cascade
 

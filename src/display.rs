@@ -2,7 +2,7 @@ use chrono::{Datelike, Local, Timelike};
 
 use crate::color::colored_field;
 use crate::config::Config;
-use crate::graph::{self, OutLine, Role};
+use crate::graph::{self, Metrics, OutLine, Role};
 use crate::weather::{WeatherDay, WeatherEntry};
 
 pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
@@ -26,12 +26,12 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
     let mut out: Vec<OutLine> = Vec::new();
 
     if let Some(name) = location {
-        out.push(OutLine { text: name.to_string(), temp: None, role: Role::Plain });
+        out.push(OutLine { text: name.to_string(), metrics: None, role: Role::Plain });
     }
 
     let (h1, h2) = wind_header_lines(&config.language);
-    out.push(OutLine { text: h1, temp: None, role: Role::GraphTitle });
-    out.push(OutLine { text: h2, temp: None, role: Role::GraphAxis });
+    out.push(OutLine { text: h1, metrics: None, role: Role::GraphTitle });
+    out.push(OutLine { text: h2, metrics: None, role: Role::GraphAxis });
 
     let ordered: Vec<_> = if config.reverse_order {
         days.iter().rev().collect()
@@ -40,7 +40,7 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
     };
     for (idx, day) in ordered.iter().enumerate() {
         if idx > 0 {
-            out.push(OutLine { text: String::new(), temp: None, role: Role::Body });
+            out.push(OutLine { text: String::new(), metrics: None, role: Role::Body });
         }
         let entries: Vec<_> = if config.reverse_order {
             day.entries.iter().rev().collect()
@@ -51,7 +51,11 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
             let is_current = current == Some((day.date, entry.hour));
             out.push(OutLine {
                 text: format_row(entry, day, entry_idx == 0, config, is_current),
-                temp: Some(entry.temp_c),
+                metrics: Some(Metrics {
+                    temp: entry.temp_c,
+                    pressure: entry.pressure_hpa,
+                    precip: entry.precip_mm,
+                }),
                 role: Role::Body,
             });
         }
@@ -62,8 +66,8 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
     // it also receives the graph title / axis scale (a bottom axis for the plot).
     if config.reverse_order {
         let (f1, f2) = wind_header_lines(&config.language);
-        out.push(OutLine { text: f1, temp: None, role: Role::GraphTitle });
-        out.push(OutLine { text: f2, temp: None, role: Role::GraphAxis });
+        out.push(OutLine { text: f1, metrics: None, role: Role::GraphTitle });
+        out.push(OutLine { text: f2, metrics: None, role: Role::GraphAxis });
     }
 
     graph::decorate(&mut out, config);
