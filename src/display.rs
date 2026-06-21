@@ -57,6 +57,15 @@ pub fn render(days: &[WeatherDay], config: &Config, location: Option<&str>) {
         }
     }
 
+    // In reverse mode the listing ends at "now", far from the top header, so
+    // repeat the header at the bottom as a footer. Built before `decorate` so
+    // it also receives the graph title / axis scale (a bottom axis for the plot).
+    if config.reverse_order {
+        let (f1, f2) = wind_header_lines(&config.language);
+        out.push(OutLine { text: f1, temp: None, role: Role::GraphTitle });
+        out.push(OutLine { text: f2, temp: None, role: Role::GraphAxis });
+    }
+
     graph::decorate(&mut out, config);
 
     for line in &out {
