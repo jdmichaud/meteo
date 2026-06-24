@@ -16,6 +16,10 @@ pub struct Config {
     pub postcode: String,
     #[serde(default = "default_true")]
     pub reverse_order: bool,
+    /// Skip TLS certificate validation for all HTTPS requests.
+    /// Useful behind intercepting proxies; insecure — leave off unless needed.
+    #[serde(default)]
+    pub ignore_ssl_cert: bool,
     pub temperature: RangeConfig,
     pub wind: RangeConfig,
     pub water: RangeConfig,
@@ -27,6 +31,7 @@ impl Default for Config {
             language: "fr".to_string(),
             postcode: String::new(),
             reverse_order: true,
+            ignore_ssl_cert: false,
             temperature: RangeConfig { min: -30.0, max: 45.0 },
             wind: RangeConfig { min: 0.0, max: 150.0 },
             water: RangeConfig { min: 0.0, max: 150.0 },

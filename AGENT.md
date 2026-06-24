@@ -48,6 +48,7 @@ cargo build --release --target x86_64-pc-windows-gnu
 |------|---------------|
 | `src/main.rs` | Entry point: arg parsing, geocode, API fetch, dispatch to `display` |
 | `src/config.rs` | TOML config load / save / auto-create default, XDG path resolution |
+| `src/http.rs` | Builds the shared `reqwest` client (honours `ignore_ssl_cert`) |
 | `src/geocode.rs` | Postcode → lat/lon/name via api-adresse.data.gouv.fr |
 | `src/api.rs` | Hybrid Open-Meteo fetch: AROME (2 d) → ARPEGE (4 d) → best_match (16 d) |
 | `src/weather.rs` | Core types: `WeatherEntry`, `WeatherDay`, `WindDir`, `Condition` |
@@ -128,3 +129,9 @@ from `day_offset` and `hour`, so output is always reproducible.
 Change factory defaults in `Config::default()` in `src/config.rs`.
 The config file is **only created when absent** — editing defaults does not
 overwrite an existing user config.
+
+`ignore_ssl_cert = true` disables TLS certificate validation for every HTTPS
+request (geocoding + weather). It's insecure — intended only for environments
+behind a TLS-intercepting proxy. The flag is read in `main.rs` and passed to
+`http::build_client`, which sets `danger_accept_invalid_certs` on the shared
+client used by both `geocode` and `api`.

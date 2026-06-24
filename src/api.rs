@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{Duration, Local, NaiveDate, NaiveDateTime, Timelike};
+use reqwest::blocking::Client;
 use serde::Deserialize;
 
 use crate::weather::{Condition, WeatherDay, WeatherEntry, WindDir};
@@ -40,18 +41,18 @@ struct RawEntry {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Fetch a hybrid forecast: AROME (days 1-2) → ARPEGE (days 3-4) → best_match (days 5+).
-pub fn fetch_forecast(lat: f64, lon: f64) -> Result<Vec<WeatherDay>, Box<dyn std::error::Error>> {
+pub fn fetch_forecast(client: &Client, lat: f64, lon: f64) -> Result<Vec<WeatherDay>, Box<dyn std::error::Error>> {
     let today = Local::now().date_naive();
 
     // Start with best_match as the baseline for all 16 days.
     let mut merged: BTreeMap<NaiveDateTime, RawEntry> = BTreeMap::new();
-    for (dt, e) in fetch_model(lat, lon, None, 16)? {
+    for (dt, e) in fetch_model(client, lat, lon, None, 16)? {
         merged.insert(dt, e);
     }
 
     // Override days 1-4 with ARPEGE when available (France + Europe).
     let arpege_cutoff = today + Duration::days(4);
-    match fetch_model(lat, lon, Some("meteofrance_arpege_europe"), 4) {
+    match fetch_model(client, lat, lon, Some("meteofrance_arpege_europe"), 4) {
         Ok(data) => {
             for (dt, e) in data {
                 if dt.date() < arpege_cutoff {
@@ -64,7 +65,7 @@ pub fn fetch_forecast(lat: f64, lon: f64) -> Result<Vec<WeatherDay>, Box<dyn std
 
     // Override days 1-2 with AROME when available (metropolitan France only).
     let arome_cutoff = today + Duration::days(2);
-    if let Ok(data) = fetch_model(lat, lon, Some("meteofrance_arome_france"), 2) {
+    if let Ok(data) = fetch_model(client, lat, lon, Some("meteofrance_arome_france"), 2) {
         for (dt, e) in data {
             if dt.date() < arome_cutoff {
                 merged.insert(dt, e);
@@ -101,6 +102,7 @@ pub fn fetch_forecast(lat: f64, lon: f64) -> Result<Vec<WeatherDay>, Box<dyn std
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 fn fetch_model(
+    client: &Client,
     lat: f64,
     lon: f64,
     model: Option<&str>,
@@ -119,7 +121,8 @@ fn fetch_model(
         url.push_str(&format!("&models={m}"));
     }
 
-    let resp: ApiResponse = reqwest::blocking::get(&url)?
+    let resp: ApiResponse = client.get(&url)
+        .send()?
         .error_for_status()?
         .json()?;
 

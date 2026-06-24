@@ -5,6 +5,7 @@ mod display;
 mod fake_data;
 mod geocode;
 mod graph;
+mod http;
 mod weather;
 
 fn main() {
@@ -29,6 +30,13 @@ fn main() {
     let order_arg: Option<bool> = if args.iter().any(|a| a == "--reverse") {
         Some(true)
     } else if args.iter().any(|a| a == "--forward") {
+        Some(false)
+    } else {
+        None
+    };
+    let ssl_arg: Option<bool> = if args.iter().any(|a| a == "--insecure") {
+        Some(true)
+    } else if args.iter().any(|a| a == "--secure") {
         Some(false)
     } else {
         None
@@ -59,6 +67,16 @@ fn main() {
         }
     }
 
+    // ── Apply SSL flag ────────────────────────────────────────────────────────
+    if let Some(ignore) = ssl_arg {
+        if cfg.ignore_ssl_cert != ignore {
+            cfg.ignore_ssl_cert = ignore;
+            if let Err(e) = config::save_config(&cfg) {
+                eprintln!("Warning: could not save SSL preference: {e}");
+            }
+        }
+    }
+
     // ── Fake data shortcut ────────────────────────────────────────────────────
     if use_fake {
         let days = fake_data::generate_fake_forecast(5);
@@ -80,8 +98,20 @@ fn main() {
         }
     };
 
+    // ── HTTP client ───────────────────────────────────────────────────────────
+    // A single client is reused for geocoding and every weather fetch. When
+    // `ignore_ssl_cert` is set in the config, TLS certificate validation is
+    // disabled for all of them.
+    let client = match http::build_client(cfg.ignore_ssl_cert) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to initialise HTTP client: {e}");
+            std::process::exit(1);
+        }
+    };
+
     // ── Geocode ───────────────────────────────────────────────────────────────
-    let location = match geocode::geocode(&postcode) {
+    let location = match geocode::geocode(&client, &postcode) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("Geocoding failed for '{}': {e}", postcode);
@@ -98,7 +128,7 @@ fn main() {
     }
 
     // ── Fetch weather ─────────────────────────────────────────────────────────
-    let days = match api::fetch_forecast(location.latitude, location.longitude) {
+    let days = match api::fetch_forecast(&client, location.latitude, location.longitude) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Weather fetch failed: {e}");
@@ -130,11 +160,14 @@ fn print_help() {
     println!("  --fake       Use deterministic fake data (no network required).");
     println!("  --reverse    Show furthest day first, today last (saved to config).");
     println!("  --forward    Show today first, furthest day last  (saved to config).");
+    println!("  --insecure   Skip TLS certificate validation       (saved to config).");
+    println!("  --secure     Enforce TLS certificate validation     (saved to config).");
     println!();
     println!("CONFIG  {}", config_path);
     println!("  language        Display language: \"fr\" (default) or \"en\".");
     println!("  postcode        Default location (saved automatically).");
     println!("  reverse_order   Persistent order preference (set via --reverse/--forward).");
+    println!("  ignore_ssl_cert Skip TLS validation; insecure (set via --insecure/--secure).");
     println!("  [temperature]   min / max °C for the colour gradient.");
     println!("  [wind]          min / max km/h for the colour gradient.");
     println!("  [water]         min / max mm for the colour gradient.");

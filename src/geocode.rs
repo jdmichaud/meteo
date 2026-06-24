@@ -1,3 +1,4 @@
+use reqwest::blocking::Client;
 use serde::Deserialize;
 
 pub struct Location {
@@ -28,13 +29,14 @@ struct GeoProperties {
     label: String,
 }
 
-pub fn geocode(postcode: &str) -> Result<Location, Box<dyn std::error::Error>> {
+pub fn geocode(client: &Client, postcode: &str) -> Result<Location, Box<dyn std::error::Error>> {
     let url = format!(
         "https://api-adresse.data.gouv.fr/search/?q={}&type=municipality&limit=1",
         postcode
     );
 
-    let resp: GeoResponse = reqwest::blocking::get(&url)?
+    let resp: GeoResponse = client.get(&url)
+        .send()?
         .error_for_status()?
         .json()?;
 
